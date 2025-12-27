@@ -121,16 +121,9 @@ class NaverStoreCrawler:
         external dependencies and tolerates minor structural changes.
         """
 
-        marker = "__NEXT_DATA__"
-        start = html.find(marker)
-        if start == -1:
+        payload = NaverStoreCrawler._extract_next_data_payload(html)
+        if not payload:
             return []
-        data_start = html.find("{", start)
-        data_end = html.find("</script>", data_start)
-        if data_start == -1 or data_end == -1:
-            return []
-
-        payload = html[data_start:data_end]
         try:
             json_data = json.loads(payload)
         except json.JSONDecodeError:
@@ -147,13 +140,15 @@ class NaverStoreCrawler:
         """
 
         products: List[ProductMeta] = []
+        seen_ids: set[str] = set()
 
         def walk(node: object) -> None:
             if isinstance(node, dict):
                 if "item" in node and isinstance(node["item"], dict):
                     product = NaverStoreCrawler._build_product_meta(node["item"])
-                    if product:
+                    if product and product.product_id not in seen_ids:
                         products.append(product)
+                        seen_ids.add(product.product_id)
                     return
                 for value in node.values():
                     walk(value)
@@ -184,17 +179,56 @@ class NaverStoreCrawler:
         product_id = str(meta.get("id") or "").strip()
         if not product_id:
             return None
+        purchase_count = NaverStoreCrawler._coerce_int(meta.get("purchaseCnt"))
         return ProductMeta(
             product_id=product_id,
             name=str(meta.get("productName") or ""),
-            price=int(meta.get("price") or 0),
-            review_count=int(meta.get("reviewCount") or 0),
-            purchase_count=int(meta.get("purchaseCnt") or 0)
-            if meta.get("purchaseCnt") is not None
-            else None,
+            price=NaverStoreCrawler._coerce_int(meta.get("price")) or 0,
+            review_count=NaverStoreCrawler._coerce_int(meta.get("reviewCount")) or 0,
+            purchase_count=purchase_count,
             image_url=meta.get("imageUrl"),
             category_path=list(meta.get("categoryPath") or []),
         )
+
+    @staticmethod
+    def _extract_next_data_payload(html: str) -> Optional[str]:
+        marker = "__NEXT_DATA__"
+        start = html.find(marker)
+        if start == -1:
+            return None
+
+        tag_start = html.rfind("<script", 0, start)
+        if tag_start == -1:
+            return None
+
+        data_start = html.find(">", tag_start)
+        if data_start == -1:
+            return None
+        data_start += 1
+
+        data_end = html.find("</script>", data_start)
+        if data_end == -1:
+            return None
+
+        return html[data_start:data_end].strip()
+
+    @staticmethod
+    def _coerce_int(value: object) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").strip()
+            if not cleaned:
+                return None
+            try:
+                return int(cleaned)
+            except ValueError:
+                return None
+        return None
 
     @staticmethod
     def as_snapshots(

@@ -7,7 +7,7 @@ def test_parse_embedded_json_from_sample_html():
       <body>
         <script id="__NEXT_DATA__" type="application/json">
           {"props": {"pageProps": {"initialState": {"products": [
-            {"item": {"id": 1001, "productName": "A", "price": 1000, "reviewCount": 10}},
+            {"item": {"id": 1001, "productName": "A", "price": "1,000", "reviewCount": 10}},
             {"item": {"id": 1002, "productName": "B", "price": 2000, "reviewCount": 20}}
           ]}}}}
         </script>
@@ -17,6 +17,7 @@ def test_parse_embedded_json_from_sample_html():
     products = NaverStoreCrawler.parse_embedded_json(html)
     assert [product.product_id for product in products] == ["1001", "1002"]
     assert products[0].name == "A"
+    assert products[0].price == 1000
     assert products[1].price == 2000
 
 
@@ -27,7 +28,7 @@ def test_parse_embedded_json_from_nested_structure():
         <script id="__NEXT_DATA__" type="application/json">
           {"props": {"pageProps": {"dehydratedState": {
             "queries": [{"state": {"data": {"content": [
-              {"item": {"id": 2001, "productName": "Nested", "price": 5550, "reviewCount": 5}}
+              {"item": {"id": 2001, "productName": "Nested", "price": 5550, "reviewCount": 5, "purchaseCnt": null}}
             ]}}}]}}}}
         </script>
       </body>
@@ -36,3 +37,4 @@ def test_parse_embedded_json_from_nested_structure():
     products = NaverStoreCrawler.parse_embedded_json(html)
     assert [product.product_id for product in products] == ["2001"]
     assert products[0].name == "Nested"
+    assert products[0].purchase_count is None
