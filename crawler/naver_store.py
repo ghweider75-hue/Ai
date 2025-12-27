@@ -136,31 +136,65 @@ class NaverStoreCrawler:
         except json.JSONDecodeError:
             return []
 
-        # Navigate to plausible product container structures
+        return NaverStoreCrawler._extract_products(json_data)
+
+    @staticmethod
+    def _extract_products(json_data: object) -> List[ProductMeta]:
+        """Traverse JSON to locate product metadata lists.
+
+        The data shape inside ``__NEXT_DATA__`` may drift; instead of relying on
+        a single path we scan nested dictionaries/lists for item payloads.
+        """
+
         products: List[ProductMeta] = []
-        items = (
-            json_data.get("props", {})
-            .get("pageProps", {})
-            .get("initialState", {})
-            .get("products", [])
-        )
-        for item in items:
-            meta = item.get("item", {})
-            product_id = str(meta.get("id"))
-            if not product_id:
-                continue
-            products.append(
-                ProductMeta(
-                    product_id=product_id,
-                    name=meta.get("productName", ""),
-                    price=int(meta.get("price", 0)),
-                    review_count=int(meta.get("reviewCount", 0)),
-                    purchase_count=meta.get("purchaseCnt"),
-                    image_url=meta.get("imageUrl"),
-                    category_path=meta.get("categoryPath", []),
-                )
+
+        def walk(node: object) -> None:
+            if isinstance(node, dict):
+                if "item" in node and isinstance(node["item"], dict):
+                    product = NaverStoreCrawler._build_product_meta(node["item"])
+                    if product:
+                        products.append(product)
+                    return
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        # Prefer the structured path when present.
+        if isinstance(json_data, dict):
+            items = (
+                json_data.get("props", {})
+                .get("pageProps", {})
+                .get("initialState", {})
+                .get("products", [])
             )
+            if isinstance(items, list) and items:
+                walk(items)
+                if products:
+                    return products
+
+        walk(json_data)
         return products
+
+    @staticmethod
+    def _build_product_meta(meta: Mapping[str, object]) -> Optional[ProductMeta]:
+        if not isinstance(meta, dict):
+            return None
+        product_id = str(meta.get("id") or "").strip()
+        if not product_id:
+            return None
+        return ProductMeta(
+            product_id=product_id,
+            name=str(meta.get("productName") or ""),
+            price=int(meta.get("price") or 0),
+            review_count=int(meta.get("reviewCount") or 0),
+            purchase_count=int(meta.get("purchaseCnt") or 0)
+            if meta.get("purchaseCnt") is not None
+            else None,
+            image_url=meta.get("imageUrl"),
+            category_path=list(meta.get("categoryPath") or []),
+        )
 
     @staticmethod
     def as_snapshots(
