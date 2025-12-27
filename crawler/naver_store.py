@@ -9,12 +9,39 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from html.parser import HTMLParser
 from typing import Iterable, List, Mapping, Optional
 from urllib.parse import urlencode, urljoin
 import json
 
 
 NAVER_STORE_BASE = "https://search.shopping.naver.com/"
+
+
+class _NextDataParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._capture = False
+        self._chunks: List[str] = []
+        self.payload: Optional[str] = None
+
+    def handle_starttag(self, tag: str, attrs: List[tuple[str, Optional[str]]]) -> None:
+        if tag != "script":
+            return
+        for key, value in attrs:
+            if key == "id" and value == "__NEXT_DATA__":
+                self._capture = True
+                self._chunks = []
+                break
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._capture:
+            self.payload = "".join(self._chunks).strip()
+            self._capture = False
+
+    def handle_data(self, data: str) -> None:
+        if self._capture:
+            self._chunks.append(data)
 
 
 @dataclass
@@ -192,25 +219,9 @@ class NaverStoreCrawler:
 
     @staticmethod
     def _extract_next_data_payload(html: str) -> Optional[str]:
-        marker = "__NEXT_DATA__"
-        start = html.find(marker)
-        if start == -1:
-            return None
-
-        tag_start = html.rfind("<script", 0, start)
-        if tag_start == -1:
-            return None
-
-        data_start = html.find(">", tag_start)
-        if data_start == -1:
-            return None
-        data_start += 1
-
-        data_end = html.find("</script>", data_start)
-        if data_end == -1:
-            return None
-
-        return html[data_start:data_end].strip()
+        parser = _NextDataParser()
+        parser.feed(html)
+        return parser.payload
 
     @staticmethod
     def _coerce_int(value: object) -> Optional[int]:
